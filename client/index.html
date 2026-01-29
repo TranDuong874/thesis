@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Camera (Sender)</title>
+    <style>
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; height: 100vh; }
+        video { width: 100%; max-height: 80vh; object-fit: cover; background: #222; }
+        .controls { padding: 20px; width: 100%; text-align: center; }
+        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #25D366; color: white; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #555; }
+        #status { margin-top: 10px; font-size: 14px; color: #aaa; }
+    </style>
+</head>
+<body>
+    <video id="localVideo" autoplay playsinline muted></video>
+    <div class="controls">
+        <button id="startBtn">Start Streaming</button>
+        <div id="status">Ready to connect...</div>
+    </div>
+
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const startBtn = document.getElementById('startBtn');
+        const statusDiv = document.getElementById('status');
+        
+        // Auto-detect IP if possible, otherwise use window.location
+        const WS_URL = `ws://${window.location.hostname}:8000/ws`;
+        
+        let localStream;
+        let peerConnection;
+        let ws;
+
+        // WebRTC Configuration (Google STUN servers)
+        const rtcConfig = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        startBtn.onclick = async () => {
+            startBtn.disabled = true;
+            statusDiv.textContent = "Accessing camera...";
+            
+            try {
+                // 1. Get Camera
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, 
+                    audio: false 
+                });
+                localVideo.srcObject = localStream;
+                
+                // 2. Connect to Signal Server
+                statusDiv.textContent = "Connecting to server...";
+                initWebSocket();
+                
+            } catch (err) {
+                console.error(err);
+                statusDiv.textContent = "Error: " + err.message;
+                startBtn.disabled = false;
+            }
+        };
+
+        function initWebSocket() {
+            ws = new WebSocket(WS_URL);
+            
+            ws.onopen = () => {
+                statusDiv.textContent = "Connected! Waiting for viewer...";
+                createPeerConnection();
+            };
+
+            ws.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+                if (!peerConnection) createPeerConnection();
+
+                if (message.type === 'answer') {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(message));
+                } else if (message.type === 'candidate') {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+                }
+            };
+        }
+
+        function createPeerConnection() {
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            // Add local stream tracks to connection
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+
+            // Handle ICE Candidates (Network details)
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+                }
+            };
+
+            // Create Offer
+            peerConnection.onnegotiationneeded = async () => {
+                try {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    ws.send(JSON.stringify(peerConnection.localDescription));
+                    statusDiv.textContent = "Offer sent. Streaming...";
+                } catch (err) {
+                    console.error("Error creating offer:", err);
+                }
+            };
+        }
+    </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, MediaStreamTrack
 import json
 from av import VideoFrame
+import uvicorn
 
 app = FastAPI()
 
@@ -35,8 +36,8 @@ class VideoProcessorTrack(MediaStreamTrack):
         new_frame = VideoFrame.from_ndarray(processed_img, format="bgr24")
         new_frame.pts = frame.pts
         new_frame.time_base = frame.time_base
-        cv2.imshow("Server Preview", processed_img) 
-        cv2.waitKey(1) # Necessary for the window to refresh
+        # cv2.imshow("Server Preview", processed_img) 
+        # cv2.waitKey(1) # Necessary for the window to refresh
         return new_frame
 
 @app.websocket('/ws/signaling_handler')
@@ -83,3 +84,8 @@ async def signaling_handler(websocket: WebSocket):
         print(f"Connection closed or error: {e}")
     finally:
         await peer_connection.close()
+
+if __name__ == "__main__":
+    # Use 0.0.0.0 to allow your Samsung Tab to connect over Wi-Fi
+    # Set reload=True so the server restarts when you change your CV logic
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
